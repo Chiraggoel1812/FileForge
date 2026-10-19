@@ -9,8 +9,19 @@ export async function reorderPdfPages(
   const total = pdf.getPageCount();
 
   if (newOrder.length === 0) throw new Error('No page order specified.');
+  if (newOrder.length !== total) {
+    throw new Error(`Expected ${total} pages but got ${newOrder.length}. Every page must appear exactly once.`);
+  }
   if (newOrder.some((p) => p < 1 || p > total)) {
     throw new Error(`Page numbers must be between 1 and ${total}.`);
+  }
+
+  const seen = new Set<number>();
+  for (const p of newOrder) {
+    if (seen.has(p)) {
+      throw new Error(`Page ${p} appears more than once. Each page must appear exactly once.`);
+    }
+    seen.add(p);
   }
 
   const indices = newOrder.map((p) => p - 1);

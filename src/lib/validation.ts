@@ -5,14 +5,6 @@ export interface ValidationResult {
   error?: string;
 }
 
-const EXT_MIME: Record<string, string> = {
-  '.pdf': 'application/pdf',
-  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-};
-
 function getExtension(name: string): string {
   const idx = name.lastIndexOf('.');
   return idx >= 0 ? name.slice(idx).toLowerCase() : '';

@@ -384,20 +384,39 @@ async function testSplitPdf() {
 
 // ── 10. Compress PDF ─────────────────────────────
 async function testCompressPdf() {
-  section('Compress PDF (logic validation)');
+  section('Compress PDF');
+  const { compressPdf } = await import('../src/lib/engines/pdfCompress.ts');
 
-  // Compress uses pdfjs canvas + jsPDF — can't run in Node.
-  // Test the "already compact" logic: if compressed >= original, keep original.
-  const largeBuf = readFixture('large.pdf');
-  const smallBuf = readFixture('one-page.pdf');
-  record('large.pdf is larger than one-page.pdf', largeBuf.length > smallBuf.length, `Large: ${largeBuf.length}, Small: ${smallBuf.length}`);
+  // Test with large PDF (pdf-lib re-save may reduce size)
+  const largeFile = makeFile(readFixture('large.pdf'), 'large.pdf', 'application/pdf');
+  const largeResult = await compressPdf(largeFile, false);
+  record('Compress large.pdf → output valid', largeResult.buffer.byteLength > 0, `Size: ${largeResult.compressedSize}`);
+  record('Compress large.pdf → correct original size', largeResult.originalSize === largeFile.size, `Original: ${largeResult.originalSize}`);
 
-  // Test the comparison logic
-  const compressedMock = largeBuf.length * 0.5;
-  record('Compressed smaller → saved=true', compressedMock < largeBuf.length, `Mock compressed: ${compressedMock}`);
+  // Verify compressed PDF is still parseable and preserves text
+  const compressedPdf = await loadPdf(Buffer.from(largeResult.buffer));
+  record('Compressed PDF preserves page count', compressedPdf.getPageCount() === 20, `Pages: ${compressedPdf.getPageCount()}`);
 
-  const compressedSmall = smallBuf.length + 100;
-  record('Compressed larger → saved=false (keep original)', compressedSmall >= smallBuf.length, `Mock compressed: ${compressedSmall}`);
+  // Verify text is preserved (not rasterized)
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const verifyPdf = await pdfjs.getDocument({ data: toUint8(Buffer.from(largeResult.buffer)) }).promise;
+  const page1 = await verifyPdf.getPage(1);
+  const content = await page1.getTextContent();
+  const text = content.items.map((i: any) => i.str).join('');
+  record('Compressed PDF preserves searchable text', text.includes('Page 1'), `Text: "${text.slice(0, 30)}"`);
+
+  // Test with already-compact PDF
+  const smallFile = makeFile(readFixture('one-page.pdf'), 'one-page.pdf', 'application/pdf');
+  const smallResult = await compressPdf(smallFile, false);
+  record('Compress one-page.pdf → output valid', smallResult.buffer.byteLength > 0, `Size: ${smallResult.compressedSize}`);
+  record('Compress one-page.pdf → saved flag is boolean', typeof smallResult.saved === 'boolean', `saved: ${smallResult.saved}`);
+
+  // If already compact, original should be returned unchanged
+  if (!smallResult.saved) {
+    record('Already compact → original returned', smallResult.compressedSize === smallResult.originalSize, `Size: ${smallResult.compressedSize}`);
+  } else {
+    record('Small PDF compressed successfully', smallResult.compressedSize < smallResult.originalSize, `Saved: ${smallResult.originalSize - smallResult.compressedSize} bytes`);
+  }
 }
 
 // ── 11. Rotate PDF ───────────────────────────────
@@ -498,7 +517,7 @@ async function testReorderPdfPages() {
     record(`Output page ${i + 1} is original page ${expectedPage}`, text.includes(`Page ${expectedPage}`), `Text: "${text.slice(0, 20)}"`);
   }
 
-  // Invalid page number
+  // Invalid page number (out of range, wrong count)
   try {
     await reorderPdfPages(file, [1, 5]);
     record('Invalid page number rejected', false, 'Should have thrown');
@@ -512,6 +531,30 @@ async function testReorderPdfPages() {
     record('Empty order rejected', false, 'Should have thrown');
   } catch (e: any) {
     record('Empty order rejected', true, e.message?.slice(0, 60));
+  }
+
+  // Duplicate page (should fail — every page must appear exactly once)
+  try {
+    await reorderPdfPages(file, [1, 1, 1, 1]);
+    record('Duplicate pages rejected', false, 'Should have thrown');
+  } catch (e: any) {
+    record('Duplicate pages rejected', true, e.message?.slice(0, 60));
+  }
+
+  // Missing page (wrong count)
+  try {
+    await reorderPdfPages(file, [1, 2, 3]);
+    record('Missing page rejected (wrong count)', false, 'Should have thrown');
+  } catch (e: any) {
+    record('Missing page rejected (wrong count)', true, e.message?.slice(0, 60));
+  }
+
+  // Extra page (too many)
+  try {
+    await reorderPdfPages(file, [1, 2, 3, 4, 1]);
+    record('Extra page rejected (too many)', false, 'Should have thrown');
+  } catch (e: any) {
+    record('Extra page rejected (too many)', true, e.message?.slice(0, 60));
   }
 }
 

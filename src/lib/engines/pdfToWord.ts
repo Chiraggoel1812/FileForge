@@ -4,18 +4,14 @@ import {
   Packer,
   Paragraph,
   TextRun,
-  HeadingLevel,
 } from 'docx';
-
-interface PageText {
-  items: { str: string; hasEOL: boolean }[];
-}
 
 export async function pdfToWord(file: File): Promise<ArrayBuffer> {
   const data = await file.arrayBuffer();
   const pdf = await loadPdf(data);
 
-  let totalText = '';
+  const pageTexts: string[] = [];
+
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
@@ -39,22 +35,22 @@ export async function pdfToWord(file: File): Promise<ArrayBuffer> {
       lastY = ty;
     }
     if (line.trim()) lines.push(line.trim());
-    totalText += lines.join('\n') + '\n\n--- Page Break ---\n\n';
+    pageTexts.push(lines.join('\n'));
   }
 
+  const totalText = pageTexts.join('\n\n');
   const hasText = totalText.replace(/[\s\-|]/g, '').length > 10;
 
   if (!hasText) {
     throw new Error(
-      'This PDF appears to contain scanned images and cannot be converted reliably into editable text.'
+      'This PDF appears to contain scanned images or no extractable text. Text-based conversion is not possible for this file.'
     );
   }
 
   const paragraphs: Paragraph[] = [];
-  const pageTexts = totalText.split('\n\n--- Page Break ---\n\n').filter((p) => p.trim());
 
-  for (const pageText of pageTexts) {
-    const pageLines = pageText.split('\n').filter((l) => l.trim());
+  for (let p = 0; p < pageTexts.length; p++) {
+    const pageLines = pageTexts[p].split('\n').filter((l) => l.trim());
     for (const l of pageLines) {
       paragraphs.push(
         new Paragraph({
@@ -63,12 +59,14 @@ export async function pdfToWord(file: File): Promise<ArrayBuffer> {
         })
       );
     }
-    paragraphs.push(
-      new Paragraph({
-        children: [new TextRun({ text: '', break: 1 })],
-        pageBreakBefore: true,
-      })
-    );
+    if (p < pageTexts.length - 1) {
+      paragraphs.push(
+        new Paragraph({
+          children: [new TextRun({ text: '' })],
+          pageBreakBefore: true,
+        })
+      );
+    }
   }
 
   const doc = new Document({

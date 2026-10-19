@@ -1,6 +1,4 @@
 import { PDFDocument } from 'pdf-lib';
-import { loadPdf, renderPageToCanvas } from '../pdfUtils';
-import { jsPDF } from 'jspdf';
 
 export interface CompressResult {
   buffer: ArrayBuffer;
@@ -16,22 +14,15 @@ export async function compressPdf(
   const originalSize = file.size;
   const data = await file.arrayBuffer();
 
-  const pdf = await loadPdf(data);
-  const scale = strong ? 1.0 : 1.5;
-  const quality = strong ? 0.5 : 0.75;
+  const pdf = await PDFDocument.load(data, { ignoreEncryption: true });
 
-  const outPdf = new jsPDF('p', 'mm', 'a4');
-  const pageWidth = 210;
-  const pageHeight = 297;
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const canvas = await renderPageToCanvas(pdf, i, scale);
-    const imgData = canvas.toDataURL('image/jpeg', quality);
-    if (i > 1) outPdf.addPage();
-    outPdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
-  }
-
-  const compressed = outPdf.output('arraybuffer');
+  // Re-save with stream compression. pdf-lib compresses uncompressed
+  // object streams and removes orphaned objects, preserving all text,
+  // vectors, images, and page dimensions.
+  const compressed = await pdf.save({
+    useObjectStreams: true,
+    addDefaultPage: false,
+  });
 
   if (compressed.byteLength >= originalSize) {
     return {
